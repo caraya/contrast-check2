@@ -2,8 +2,10 @@ import "./style.css";
 import { evaluateContrast, type FontWeight } from "../contrast/contrast-validator";
 import {
   ARC_USE_CASES,
+  ARC_REVIEW_NOTICE,
   EMPTY_ARC_ASSESSMENT,
   assessArc,
+  createArcReviewPacket,
   equivalentReferenceFontSize,
   makeArcTextUse,
   type ArcAssessmentData,
@@ -161,7 +163,7 @@ app.innerHTML = `
             <div class="panel-heading results-heading">
               <div>
                 <p class="section-index">THE READOUT</p>
-                <h2 id="results-heading">Contrast results</h2>
+                <h2 id="results-heading">Current-pair contrast results</h2>
               </div>
               <span class="result-status" id="overall-status">Ready to check</span>
             </div>
@@ -255,7 +257,7 @@ app.innerHTML = `
 
               <section class="assessment-panel assessment-results" aria-labelledby="level-results-heading">
                 <div class="assessment-panel-heading">
-                  <div><h3 id="level-results-heading">Project-level level checks</h3><p>These require evidence across the declared scope. “Ready for review” is not certification.</p></div>
+                  <div><h3 id="level-results-heading">Project review readiness</h3><p>${ARC_REVIEW_NOTICE} “Ready for review” means configured fields and checks are complete; independent assessment is still required.</p></div>
                 </div>
                 <div id="arc-level-results" class="level-results"></div>
               </section>
@@ -866,14 +868,22 @@ function renderLevelResult(result: ArcLevelResult): HTMLElement {
         : "Evidence needed";
   const badge = createElement("span", "level-status", statusText);
   heading.append(title, badge);
-  card.append(heading, createElement("p", "level-summary", result.summary));
+  card.append(
+    heading,
+    createElement("p", "level-summary", result.summary),
+    createElement("p", "level-notice", result.notice),
+  );
 
   const checks = createElement("ul", "level-check-list");
   result.checks.forEach((check) => {
     const item = createElement("li", `level-check level-check--${check.status}`);
     item.append(
       createElement("strong", undefined, check.label),
-      createElement("span", undefined, check.detail),
+      createElement(
+        "span",
+        undefined,
+        `${check.basis === "calculated" ? "Calculated from supplied inputs" : check.basis === "reviewer-attested" ? "Reviewer-attested; not independently verified" : "Calculated from recorded inventory / attestations"}: ${check.detail}`,
+      ),
     );
     checks.append(item);
   });
@@ -1001,14 +1011,7 @@ exchangeRuleForm.addEventListener("submit", (event) => {
 
 exportAssessmentButton.addEventListener("click", () => {
   try {
-    const packet = {
-      format: "contrast-lab-arc-review",
-      formatVersion: 1,
-      generatedAt: new Date().toISOString(),
-      notice: "Draft screening and recorded evidence only. Not ARC certification.",
-      assessment: arcData,
-      results: assessArc(arcData),
-    };
+    const packet = createArcReviewPacket(arcData);
     const blob = new Blob([JSON.stringify(packet, null, 2)], {
       type: "application/json",
     });
@@ -1046,7 +1049,7 @@ assessmentFileInput.addEventListener("change", async () => {
     ) {
       throw new Error("Choose a valid Contrast Lab ARC review packet.");
     }
-    arcData = packet.assessment;
+    arcData = { ...packet.assessment, fontTests: packet.assessment.fontTests ?? [] };
     persistAssessment("Imported ARC review packet and saved it in this browser.");
   } catch (error) {
     setAssessmentNotice(

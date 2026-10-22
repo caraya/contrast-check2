@@ -100,11 +100,41 @@ export interface ArcTextResult {
 
 export type ArcLevelStatus = "incomplete" | "criteria-not-met" | "ready-for-review";
 
+export const ARC_REVIEW_NOTICE =
+  "Recorded screening checks and evidence only. Not an ARC conformance determination.";
+
+export const ARC_SCREENING_PROFILE = {
+  id: "contrast-lab-arc-screening",
+  version: 1,
+  name: "APCA use-case and typography screening with recorded ARC review evidence",
+  criterionVersion: "Not selected; full ARC draft criteria are not implemented.",
+  useCaseMinimumLc: Object.fromEntries(
+    ARC_USE_CASES.map((useCase) => [useCase.id, useCase.minimumLc]),
+  ),
+  typography: "apca-w3 font lookup at locally x-height-normalized CSS size and entered weight",
+  requiredReviewedExchangeRules: { silver: 1, gold: 2 },
+  limitations: [
+    "This profile is not a complete transcription of any ARC draft and does not certify conformance.",
+    "Inventory coverage, text purpose, and rendered inputs are supplied by the user, not independently verified.",
+    "Font qualification, body-text review, and exchange-rule validity are recorded attestations, not automated verification.",
+    "Local x-height metrics are browser/OS-specific and do not establish font qualification.",
+    "Ready for review means configured checks and evidence fields are complete; independent assessment is still required.",
+  ],
+} as const;
+
+export type ArcCheckBasis = "calculated" | "reviewer-attested" | "mixed";
+
 export interface ArcLevelResult {
   level: "Bronze" | "Silver" | "Gold";
   status: ArcLevelStatus;
   summary: string;
-  checks: Array<{ label: string; status: "complete" | "missing" | "failed"; detail: string }>;
+  notice: string;
+  checks: Array<{
+    label: string;
+    status: "complete" | "missing" | "failed";
+    basis: ArcCheckBasis;
+    detail: string;
+  }>;
 }
 
 export interface ArcAssessmentResult {
@@ -186,7 +216,7 @@ function buildLevelResult(
         ? "Add the missing inventory or supporting evidence."
         : "Recorded checks are complete. Submit evidence for independent ARC review.";
 
-  return { level, status, summary, checks };
+  return { level, status, summary, notice: ARC_REVIEW_NOTICE, checks };
 }
 
 export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
@@ -232,6 +262,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
   const bronzeChecks: ArcLevelResult["checks"] = [
     {
       label: "Scoped text inventory",
+      basis: "mixed",
       status: inventoryComplete ? "complete" : "missing",
       detail: inventoryComplete
         ? `${textResults.length} inventoried text uses; scope and completeness evidence recorded.`
@@ -239,6 +270,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
     },
     ...textResults.map(({ entry, report, bronzePass, bronzeRequiredLc }) => ({
       label: entry.name,
+      basis: "calculated" as const,
       status: bronzePass ? ("complete" as const) : ("failed" as const),
       detail: `|Lc ${report.apca.lightnessContrast}| / ${bronzeRequiredLc} required for ${ARC_USE_CASES.find((item) => item.id === entry.useCase)?.label}.`,
     })),
@@ -258,6 +290,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
   const silverChecks: ArcLevelResult["checks"] = [
     {
       label: "Fluent and sub-fluent text inventory",
+      basis: "mixed",
       status:
         inventoryComplete && silverEntries.length > 0
           ? "complete"
@@ -269,6 +302,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
     },
     {
       label: "Body-text coverage",
+      basis: "calculated",
       status: silverBodyEntries.length > 0 ? "complete" : "missing",
       detail:
         silverBodyEntries.length > 0
@@ -277,6 +311,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
     },
     ...silverEntries.map(({ entry, lookupPass, report }) => ({
       label: `${entry.name} typography lookup`,
+      basis: "calculated" as const,
       status: !findXHeightTest(entry, data.fontTests)
         ? ("missing" as const)
         : lookupPass &&
@@ -297,6 +332,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
       );
       return {
         label: `${family} body-font qualification`,
+        basis: "reviewer-attested" as const,
         status: complete
           ? ("complete" as const)
           : evidence?.reviewed && !evidence.qualified
@@ -309,6 +345,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
     }),
     {
       label: "At least one reviewed exchange rule",
+      basis: "mixed",
       status: silverRuleCount > 0 ? "complete" : "missing",
       detail:
         silverRuleCount > 0
@@ -330,6 +367,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
   const goldChecks: ArcLevelResult["checks"] = [
     {
       label: "Complete all-text inventory",
+      basis: "mixed",
       status: inventoryComplete ? "complete" : "missing",
       detail: inventoryComplete
         ? `${textResults.length} text uses recorded across the declared scope.`
@@ -337,6 +375,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
     },
     ...goldEntries.map(({ entry, lookupPass, report }) => ({
       label: `${entry.name} typography lookup`,
+      basis: "calculated" as const,
       status: !findXHeightTest(entry, data.fontTests)
         ? ("missing" as const)
         : lookupPass &&
@@ -357,6 +396,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
       );
       return {
         label: `${family} fluent-text font qualification`,
+        basis: "reviewer-attested" as const,
         status: complete
           ? ("complete" as const)
           : evidence?.reviewed && !evidence.qualified
@@ -369,6 +409,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
     }),
     {
       label: "Stricter body-text review",
+      basis: "reviewer-attested",
       status:
         data.project.bodyReviewComplete && data.project.bodyReviewEvidence.trim()
           ? "complete"
@@ -380,6 +421,7 @@ export function assessArc(data: ArcAssessmentData): ArcAssessmentResult {
     },
     {
       label: "At least two reviewed exchange rules",
+      basis: "mixed",
       status: goldRuleCount >= 2 ? "complete" : "missing",
       detail:
         goldRuleCount >= 2
@@ -403,4 +445,25 @@ export function makeArcTextUse(
   id = globalThis.crypto.randomUUID(),
 ): ArcTextUse {
   return { ...input, id };
+}
+
+export function createArcReviewPacket(data: ArcAssessmentData) {
+  return {
+    format: "contrast-lab-arc-review",
+    formatVersion: 1,
+    generatedAt: new Date().toISOString(),
+    notice: ARC_REVIEW_NOTICE,
+    screeningProfile: ARC_SCREENING_PROFILE,
+    checkBasis: {
+      calculated: "Calculated from supplied inputs; not independent verification of rendering or scope.",
+      "reviewer-attested": "Recorded reviewer outcome and evidence reference; validity is not verified by this tool.",
+      mixed: "Calculated counts or completeness checks over user-supplied inventory and reviewer attestations.",
+    },
+    independentConformanceAssessment: {
+      status: "not-performed",
+      notice: "This tool does not perform an independent conformance assessment or issue certification.",
+    },
+    assessment: data,
+    results: assessArc(data),
+  };
 }

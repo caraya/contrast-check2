@@ -31,6 +31,8 @@ The checker runs in the browser. Enter opaque text and background colors, set th
 
 The optional project-wide ARC review is below the contrast results and collapsed by default. It can collect a text inventory and reviewer evidence, then export or import a JSON review packet. Its Bronze/Silver/Gold checks are project-level screening only, not an ARC certification, and do not change the ordinary WCAG/APCA calculation for the current pair.
 
+Project review statuses carry a non-conformance notice. Each checklist item identifies whether it is calculated from supplied inputs, reviewer-attested, or a combination. Exported packets include the versioned screening profile, its limitations, and an explicit statement that independent conformance assessment has not been performed.
+
 ## Other commands
 
 ```bash

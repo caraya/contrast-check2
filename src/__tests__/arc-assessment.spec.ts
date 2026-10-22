@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_ARC_ASSESSMENT,
+  ARC_REVIEW_NOTICE,
   assessArc,
+  createArcReviewPacket,
   equivalentReferenceFontSize,
   type ArcAssessmentData,
 } from "../arc/arc-assessment";
@@ -158,5 +160,101 @@ describe("ARC draft assessment", () => {
         check.label.includes("typography lookup"),
       )?.status,
     ).toBe("missing");
+  });
+
+  it.each<{
+    name: string;
+    removeEvidence: (data: ArcAssessmentData) => void;
+    affectedLevels: Array<"bronze" | "silver" | "gold">;
+  }>([
+    {
+      name: "scope",
+      removeEvidence: (data) => { data.project.scope = ""; },
+      affectedLevels: ["bronze", "silver", "gold"],
+    },
+    {
+      name: "inventory attestation",
+      removeEvidence: (data) => { data.project.inventoryComplete = false; },
+      affectedLevels: ["bronze", "silver", "gold"],
+    },
+    {
+      name: "inventory reference",
+      removeEvidence: (data) => { data.project.inventoryEvidence = " "; },
+      affectedLevels: ["bronze", "silver", "gold"],
+    },
+    {
+      name: "font qualification attestation",
+      removeEvidence: (data) => { data.fontEvidence[0].reviewed = false; },
+      affectedLevels: ["silver", "gold"],
+    },
+    {
+      name: "font qualification reference",
+      removeEvidence: (data) => { data.fontEvidence[0].evidence = " "; },
+      affectedLevels: ["silver", "gold"],
+    },
+    {
+      name: "exchange-rule review",
+      removeEvidence: (data) => { data.exchangeRules.forEach((rule) => { rule.reviewed = false; }); },
+      affectedLevels: ["silver", "gold"],
+    },
+    {
+      name: "exchange-rule references",
+      removeEvidence: (data) => { data.exchangeRules.forEach((rule) => { rule.evidence = ""; }); },
+      affectedLevels: ["silver", "gold"],
+    },
+    {
+      name: "body-text attestation",
+      removeEvidence: (data) => { data.project.bodyReviewComplete = false; },
+      affectedLevels: ["gold"],
+    },
+    {
+      name: "body-text evidence",
+      removeEvidence: (data) => { data.project.bodyReviewEvidence = " "; },
+      affectedLevels: ["gold"],
+    },
+  ])("does not report review readiness without $name", ({ removeEvidence, affectedLevels }) => {
+    const data = completeAssessment();
+    removeEvidence(data);
+    const { levels } = assessArc(data);
+    affectedLevels.forEach((level) => {
+      expect(levels[level].status).toBe("incomplete");
+      expect(levels[level].checks.some((check) => check.status === "missing")).toBe(true);
+    });
+  });
+
+  it("does not count duplicate exchange rules as two Gold rules", () => {
+    const data = completeAssessment();
+    data.exchangeRules[1].name = ` ${data.exchangeRules[0].name.toUpperCase()} `;
+    expect(assessArc(data).levels.gold.status).toBe("incomplete");
+  });
+
+  it.each(["complete", "empty"] as const)(
+    "retains profile, limitations, and non-conformance notices in a serialized %s packet",
+    (state) => {
+      const packet = createArcReviewPacket(
+        state === "complete" ? completeAssessment() : structuredClone(EMPTY_ARC_ASSESSMENT),
+      );
+      const serialized = JSON.parse(JSON.stringify(packet));
+
+      expect(serialized.notice).toBe(ARC_REVIEW_NOTICE);
+      expect(serialized.screeningProfile.id).toBe("contrast-lab-arc-screening");
+      expect(serialized.screeningProfile.version).toBe(1);
+      expect(serialized.screeningProfile.useCaseMinimumLc).toEqual({
+        body: 75, fluent: 60, subfluent: 45, spot: 30,
+      });
+      expect(serialized.screeningProfile.limitations.length).toBeGreaterThanOrEqual(5);
+      expect(serialized.independentConformanceAssessment.status).toBe("not-performed");
+      Object.values(packet.results.levels).forEach((level) => {
+        expect(serialized.results.levels[level.level.toLowerCase()].notice).toBe(ARC_REVIEW_NOTICE);
+        expect(level.checks.every((check) => Object.hasOwn(packet.checkBasis, check.basis))).toBe(true);
+      });
+    },
+  );
+
+  it("distinguishes calculated checks from reviewer attestations and mixed checks", () => {
+    const checks = assessArc(completeAssessment()).levels.silver.checks;
+    expect(checks.find((check) => check.label.includes("typography lookup"))?.basis).toBe("calculated");
+    expect(checks.find((check) => check.label.includes("font qualification"))?.basis).toBe("reviewer-attested");
+    expect(checks.find((check) => check.label.includes("exchange rule"))?.basis).toBe("mixed");
   });
 });
